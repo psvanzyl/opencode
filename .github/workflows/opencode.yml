@@ -29,4 +29,4 @@ jobs:
         ZEN_API_KEY: ${{ secrets.ZEN_API_KEY }}
       with:
         model: opencode/deepseek-v4-flash
-        use_github_token: true
+        token: ${{ secrets.GITHUB_TOKEN }}

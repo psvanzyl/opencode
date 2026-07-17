@@ -27,6 +27,7 @@ jobs:
       uses: anomalyco/opencode/github@latest
       env:
         ZEN_API_KEY: ${{ secrets.ZEN_API_KEY }}
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       with:
         model: opencode/deepseek-v4-flash
-        token: ${{ secrets.GITHUB_TOKEN }}
+        use_github_token: true

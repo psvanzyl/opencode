@@ -1,0 +1,213 @@
+<!DOCTYPE html>
+<html lang="nl">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1, user-scalable=no">
+<title>Pakketpuntenviewer</title>
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+<style>
+*{box-sizing:border-box;margin:0;padding:0}
+body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;height:100vh;display:flex;flex-direction:column;background:#f5f5f5}
+header{background:#fff;border-bottom:1px solid #e0e0e0;padding:8px 12px;display:flex;align-items:center;gap:8px;z-index:1000;flex-wrap:wrap}
+header h1{font-size:18px;color:#333;white-space:nowrap}
+header h1 span{font-weight:400;color:#666}
+.search-row{display:flex;align-items:center;gap:8px;flex:1;min-width:200px}
+.search-row select,.search-row input{flex:1;padding:8px 10px;border:1px solid #ccc;border-radius:6px;font-size:14px;max-width:300px}
+.search-row input::placeholder{color:#999}
+.filter-bar{display:flex;gap:4px;flex-wrap:wrap;padding:8px 12px;background:#fff;border-bottom:1px solid #e0e0e0;z-index:999}
+.filter-btn{padding:4px 12px;border:1px solid #ddd;border-radius:16px;font-size:12px;cursor:pointer;background:#fff;color:#555;transition:all .15s}
+.filter-btn:hover{background:#f0f0f0}
+.filter-btn.active{background:#1976d2;color:#fff;border-color:#1976d2}
+.stats{font-size:12px;color:#888;padding:4px 12px;display:flex;gap:16px;flex-wrap:wrap}
+.stats strong{color:#333}
+#map{flex:1;width:100%}
+.info-footer{background:#fff;border-top:1px solid #e0e0e0;padding:6px 12px;font-size:11px;color:#888;text-align:center}
+.leaflet-popup-content{margin:8px;min-width:200px}
+.leaflet-popup-content h3{font-size:14px;margin-bottom:4px}
+.leaflet-popup-content p{margin:2px 0;font-size:12px;color:#555}
+.carrier-badge{display:inline-block;padding:1px 8px;border-radius:10px;font-size:11px;font-weight:600;color:#fff;margin-top:4px}
+@media(max-width:640px){header h1{font-size:15px}.search-row select,.search-row input{max-width:100%;font-size:13px;padding:6px 8px}}
+</style>
+</head>
+<body>
+
+<header>
+<h1>&#128230; <span>Pakketpunten</span></h1>
+<div class="search-row">
+<select id="municipality" onchange="selectMunicipality(this.value)">
+<option value="">Selecteer gemeente...</option>
+</select>
+<input type="text" id="addressSearch" placeholder="Zoek adres...">
+</div>
+</header>
+
+<div class="filter-bar" id="filterBar"></div>
+
+<div class="stats" id="stats"></div>
+
+<div id="map"></div>
+
+<div class="info-footer">Data: OpenStreetMap | Pakketpuntenviewer</div>
+
+<script>
+
+const CARRIER_COLORS = {
+DHL:'#ffcc00',PostNL:'#003399',DPD:'#e30613',InPost:'#fed500',
+Budbee:'#00a651',GLS:'#ed1c24',Amazon:'#ff9900',VintedGo:'#09b1ba',
+ViaTim:'#e94e1b',DeBuren:'#7ac143'
+};
+
+const CARRIERS = Object.keys(CARRIER_COLORS);
+
+const MUNICIPALITIES = {
+zwolle:{lat:52.5168,lng:6.0830},
+amsterdam:{lat:52.3676,lng:4.9041},
+rotterdam:{lat:51.9244,lng:4.4777},
+utrecht:{lat:52.0907,lng:5.1214},
+denhaag:{lat:52.0705,lng:4.3007},
+eindhoven:{lat:51.4416,lng:5.4697},
+groningen:{lat:53.2194,lng:6.5665},
+maastricht:{lat:50.8514,lng:5.6910},
+arnhem:{lat:51.9851,lng:5.8987},
+breda:{lat:51.5719,lng:4.7683}
+};
+
+function randomPoints(slug,count){
+const c=MUNICIPALITIES[slug];if(!c)return[];
+const pts=[];
+for(let i=0;i<count;i++){
+const carrier=CARRIERS[Math.floor(Math.random()*CARRIERS.length)];
+const names={
+DHL:['DHL Paketshop','DHL Parcel','DHL ServicePoint'],
+PostNL:['PostNL Punt','PostNL Pakketpunt','PostNL Locatie'],
+DPD:['DPD Pickup','DPD Pakketshop','DPD Punt'],
+InPost:['InPost Paczkomat','InPost Locker','InPost Punkt'],
+Budbee:['Budbee Box','Budbee Punt','Budbee Locker'],
+GLS:['GLS Paketshop','GLS Punt','GLS Parcel'],
+Amazon:['Amazon Hub','Amazon Locker','Amazon Counter'],
+VintedGo:['VintedGo Punt','VintedGo Locker'],
+ViaTim:['ViaTim Punt','ViaTim Pakketpunt'],
+DeBuren:['De Buren Punt','De Buren Pakketpunt']
+};
+const nameList=names[carrier]||[carrier+' Punt'];
+const offset=0.015;
+const pt={
+id:slug+'-'+i,
+name:nameList[Math.floor(Math.random()*nameList.length)],
+carrier,
+address:['Straat '+(100+i),'1'+(i%10),'1234 AB'].join(' '),
+city:slug.charAt(0).toUpperCase()+slug.slice(1),
+lat:c.lat+(Math.random()-0.5)*offset*2,
+lng:c.lng+(Math.random()-0.5)*offset*2,
+};
+pts.push(pt);
+}
+return pts;
+}
+
+const allData={};
+for(const slug of Object.keys(MUNICIPALITIES)){
+allData[slug]=randomPoints(slug,12+Math.floor(Math.random()*20));
+}
+
+let map, markers=[], activeCarriers=new Set(CARRIERS), currentSlug='';
+
+function initMap(){
+map=L.map('map',{zoomControl:true,attributionControl:false}).setView([52.1326,5.2913],8);
+L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png',{
+maxZoom:19
+}).addTo(map);
+L.control.zoom({position:'topright'}).addTo(map);
+}
+
+function initSelect(){
+const sel=document.getElementById('municipality');
+for(const slug of Object.keys(MUNICIPALITIES)){
+const name=slug.charAt(0).toUpperCase()+slug.slice(1);
+const opt=document.createElement('option');
+opt.value=slug;
+opt.textContent=name;
+sel.appendChild(opt);
+}
+const params=new URLSearchParams(location.search);
+const g=params.get('gemeente');
+if(g&&MUNICIPALITIES[g]){sel.value=g;selectMunicipality(g);}
+}
+
+function initFilters(){
+const bar=document.getElementById('filterBar');
+for(const c of CARRIERS){
+const btn=document.createElement('button');
+btn.className='filter-btn active';
+btn.textContent=c;
+btn.dataset.carrier=c;
+btn.onclick=()=>{
+if(activeCarriers.has(c)){activeCarriers.delete(c);btn.classList.remove('active');}
+else{activeCarriers.add(c);btn.classList.add('active');}
+renderMarkers();
+updateStats();
+};
+bar.appendChild(btn);
+}
+}
+
+function selectMunicipality(slug){
+if(!slug||!MUNICIPALITIES[slug])return;
+currentSlug=slug;
+const c=MUNICIPALITIES[slug];
+map.setView([c.lat,c.lng],14);
+renderMarkers();
+updateStats();
+if(history.replaceState){
+const url=new URL(location);
+url.searchParams.set('gemeente',slug);
+history.replaceState(null,'',url);
+}
+}
+
+function renderMarkers(){
+clearMarkers();
+if(!currentSlug||!allData[currentSlug])return;
+const pts=allData[currentSlug];
+for(const pt of pts){
+if(!activeCarriers.has(pt.carrier))continue;
+const color=CARRIER_COLORS[pt.carrier]||'#888';
+const icon=L.divIcon({
+html:`<div style="width:24px;height:24px;border-radius:50%;background:${color};border:2px solid #fff;box-shadow:0 1px 3px rgba(0,0,0,0.3);display:flex;align-items:center;justify-content:center;font-size:10px;font-weight:700;color:#333">${pt.carrier[0]}</div>`,
+iconSize:[24,24],
+iconAnchor:[12,12],
+popupAnchor:[0,-12],
+className:''
+});
+const m=L.marker([pt.lat,pt.lng],{icon}).addTo(map);
+const carrierColor=color;
+m.bindPopup(`
+<h3>${pt.name}</h3>
+<p>${pt.address}</p>
+<p>${pt.city}</p>
+<span class="carrier-badge" style="background:${carrierColor};color:${pt.carrier==='PostNL'||pt.carrier==='DPD'||pt.carrier==='GLS'?'#fff':'#333'}">${pt.carrier}</span>
+`);
+markers.push(m);
+}
+}
+
+function clearMarkers(){
+for(const m of markers)map.removeLayer(m);
+markers=[];
+}
+
+function updateStats(){
+const total=currentSlug&&allData[currentSlug]?allData[currentSlug].length:0;
+const shown=markers.length;
+document.getElementById('stats').innerHTML=
+currentSlug?`<strong>${currentSlug.charAt(0).toUpperCase()+currentSlug.slice(1)}</strong>: ${shown} van ${total} pakketpunten getoond | ${activeCarriers.size} vervoerders actief`:'Selecteer een gemeente om pakketpunten te bekijken';
+}
+
+initMap();
+initSelect();
+initFilters();
+updateStats();
+</script>
+</body>
+</html>

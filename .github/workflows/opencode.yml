@@ -14,6 +14,9 @@ jobs:
     runs-on: ubuntu-latest
     permissions:
       id-token: write
+      contents: write
+      pull-requests: write
+      issues: write
     steps:
     - name: Checkout repository
       uses: actions/checkout@v6
@@ -26,3 +29,4 @@ jobs:
         ZEN_API_KEY: ${{ secrets.ZEN_API_KEY }}
       with:
         model: opencode/deepseek-v4-flash
+        use_github_token: true
